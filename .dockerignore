@@ -1,0 +1,38 @@
+# The GPL tarballs are consumed by prepare_gpl_source.sh on the host, never by the
+# Dockerfile - the image only needs the extracted tree. They are ~1GB.
+gpl_source/
+
+# Build output and packaging artifacts
+output/
+qpkg/*/build/
+qpkg/*/arm_64/
+
+# QNAP ships GPL_QTS/src/linux-5.10 pre-built for x86_64. build_kernel.sh runs
+# `make mrproper` and rebuilds the tree for arm64, so none of the x86 build
+# products are worth sending to the daemon (~590MB).
+GPL_QTS/src/linux-5.10/**/*.o
+GPL_QTS/src/linux-5.10/**/*.cmd
+GPL_QTS/src/linux-5.10/**/*.ko
+GPL_QTS/src/linux-5.10/**/*.mod
+GPL_QTS/src/linux-5.10/**/*.mod.c
+GPL_QTS/src/linux-5.10/vmlinux
+GPL_QTS/src/linux-5.10/.tmp_vmlinux*
+GPL_QTS/src/linux-5.10/.tmp_System.map
+GPL_QTS/src/linux-5.10/System.map
+GPL_QTS/src/linux-5.10/Module.symvers
+GPL_QTS/src/linux-5.10/modules-only.symvers
+GPL_QTS/src/linux-5.10/modules.builtin*
+GPL_QTS/src/linux-5.10/modules.order
+GPL_QTS/src/linux-5.10/.config.old
+GPL_QTS/src/linux-5.10/include/config/
+GPL_QTS/src/linux-5.10/include/generated/
+GPL_QTS/src/linux-5.10/arch/x86/boot/
+
+# Kernel series the arm64 build does not use
+GPL_QTS/src/linux-4.2/
+GPL_QTS/src/linux-4.14/
+
+.git/
+.github/
+*.log
+*.qpkg

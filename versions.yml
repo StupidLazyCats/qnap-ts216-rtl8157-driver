@@ -1,0 +1,78 @@
+# Version configuration for RTL8125 Driver QPKG
+# This file controls all versions and GPL sources used during the build process
+
+# Realtek r8125 driver version to download and compile.
+# This is the upstream Realtek version, and is what gets stamped into the QPKG and
+# reported by `modinfo r8125`.
+driver_version: "9.018.00"
+
+# Where to fetch the driver source from.
+#
+# Realtek's own download page (https://www.realtek.com/Download/List?cate_id=584)
+# is a JS-rendered SPA whose files sit behind a per-release download id and an
+# EULA confirmation POST, so it cannot be fetched reproducibly from a script and
+# any hardcoded id breaks on the next release. driver_source_tag instead points at
+# a tag of awesometic/realtek-r8125-dkms, which vendors Realtek's pristine src/
+# tree alongside Realtek's own REALTEK_README.txt.
+#
+# Set driver_url to fetch from somewhere else - a Realtek direct link obtained by
+# hand, or a local mirror. When non-empty it takes precedence over
+# driver_source_tag. The archive must unpack to a tree containing src/Makefile.
+driver_source_tag: "9.018.00-1"
+driver_url: ""
+
+# QNAP GPL Kernel Source Configuration
+# The GPL source is distributed as split archives that must be concatenated
+# List the URLs in order - they will be downloaded and combined automatically
+gpl_source:
+  # QTS/QuTS hero 5.2.3 (kernel 5.10.60-qnap)
+  kernel_version: "5.10.60"
+  qts_version: "5.2.3"
+  build_date: "20250218"
+
+  # Split archive URLs (must be in correct order for concatenation)
+  urls:
+    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.3/QTS_Kernel_5.2.3.20250218.0.tar.gz?viasf=1"
+    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.3/QTS_Kernel_5.2.3.20250218.1.tar.gz?viasf=1"
+
+  # Alternative: Single archive (if QNAP provides non-split version)
+  # urls:
+  #   - "https://path/to/single/archive.tar.gz"
+
+# Target platform: QNAP TS-433 (Rockchip RK3568, ARM Cortex-A55, aarch64)
+#
+# target_model    - subdirectory under GPL_QTS/kernel_cfg/ holding the kernel config.
+#                   TS-X33 is the TS-233/TS-433 family (CONFIG_ARCH_ROCKCHIP=y).
+# kernel_config   - the config file the kernel tree is built with.
+# kernel_arch     - value passed to the kernel build as ARCH=.
+# cross_compile   - toolchain prefix. The build host is x86_64, so the module is
+#                   cross-compiled; QNAP built this kernel the same way (their
+#                   config records "gcc (Debian 4.9.2-10) 4.9.2", a cross build).
+# qpkg_arch       - QDK architecture directory name (see `qbuild --help`).
+#                   Valid values: arm-x09, arm-x19, arm-x31, arm-x41, arm_64,
+#                   x86, x86_ce53xx, x86_64. Also names the output .qpkg.
+# target_uname_m  - what `uname -m` reports on the NAS, checked at install time.
+target_model: "TS-X33"
+kernel_config: "linux-5.10-arm64.config"
+kernel_arch: "arm64"
+cross_compile: "aarch64-linux-gnu-"
+qpkg_arch: "arm_64"
+target_uname_m: "aarch64"
+
+# Notes:
+# - driver_version: The upstream Realtek r8125 version being packaged
+# - gpl_source.urls: Can be 1 or more URLs - will be concatenated in order
+# - target_model: Must match a directory in GPL_QTS/kernel_cfg/
+# - qpkg_version: Derived from git tag (e.g., release-5.55.1b1 -> 5.55.1b1)
+#
+# Unlike the x86_64 build this project started from, QNAP's GPL bundle ships the
+# 5.10 tree pre-built for x86_64 ONLY (vmlinux, Module.symvers and
+# scripts/mod/modpost are all x86-64 ELF binaries). The arm64 kernel tree therefore
+# has to be configured and built from source at Docker image build time - see
+# build_kernel.sh.
+#
+# Example:
+# - driver_version: 9.018.00 (actual Realtek r8125 driver)
+# - gpl_source.kernel_version: 5.10.60 (QNAP kernel)
+# - git tag: release-5.55.1b1
+# - Result: QPKG contains driver 9.016.01, packaged as version 5.55.1b1

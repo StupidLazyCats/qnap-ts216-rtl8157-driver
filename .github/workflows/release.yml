@@ -1,0 +1,204 @@
+name: Build and Release QPKG
+
+on:
+  push:
+    tags:
+      - 'release-*'
+  workflow_dispatch:
+    inputs:
+      qpkg_version:
+        description: 'QPKG package version (leave empty to use driver_version from versions.yml)'
+        required: false
+        default: ''
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        type: boolean
+        default: false
+      force_rebuild:
+        description: 'Force rebuild Docker image (bypass cache)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load versions from versions.yml
+        id: get_version
+        run: |
+          # Read versions from versions.yml
+          DRIVER_VERSION=$(grep '^driver_version:' versions.yml | sed 's/driver_version:[[:space:]]*"\(.*\)"/\1/' | tr -d '"' | tr -d "'")
+          KERNEL_VERSION=$(grep 'kernel_version:' versions.yml | head -1 | sed 's/.*kernel_version:[[:space:]]*"\(.*\)".*/\1/' | tr -d '"' | tr -d "'")
+          QTS_VERSION=$(grep 'qts_version:' versions.yml | sed 's/.*qts_version:[[:space:]]*"\(.*\)".*/\1/' | tr -d '"' | tr -d "'")
+
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual trigger - use input, or fall back to driver_version from versions.yml
+            QPKG_VERSION="${{ github.event.inputs.qpkg_version }}"
+            if [ -z "$QPKG_VERSION" ]; then
+              QPKG_VERSION="$DRIVER_VERSION"
+            fi
+          else
+            # Tag trigger - extract QPKG version from tag (e.g., release-5.55.1b1 -> 5.55.1b1)
+            QPKG_VERSION=${GITHUB_REF#refs/tags/release-}
+          fi
+
+          # Target platform (same keys build.sh reads)
+          read_key() {
+            grep "^$1:" versions.yml | sed "s/^$1:[[:space:]]*\"\(.*\)\".*/\1/" | tr -d '"' | tr -d "'"
+          }
+          TARGET_MODEL=$(read_key target_model)
+          KERNEL_CONFIG_FILE=$(read_key kernel_config)
+          KERNEL_ARCH=$(read_key kernel_arch)
+          CROSS_COMPILE_PREFIX=$(read_key cross_compile)
+          QPKG_ARCH=$(read_key qpkg_arch)
+          KERNEL_SERIES=$(echo "$KERNEL_VERSION" | cut -d. -f1-2)
+
+          # Compute Docker image tag based on versions for cache management
+          DOCKER_TAG="qts-${QTS_VERSION}-kernel-${KERNEL_VERSION}-${KERNEL_ARCH}-driver-${DRIVER_VERSION}"
+
+          echo "target_model=$TARGET_MODEL" >> $GITHUB_OUTPUT
+          echo "kernel_config_file=$KERNEL_CONFIG_FILE" >> $GITHUB_OUTPUT
+          echo "kernel_arch=$KERNEL_ARCH" >> $GITHUB_OUTPUT
+          echo "cross_compile_prefix=$CROSS_COMPILE_PREFIX" >> $GITHUB_OUTPUT
+          echo "qpkg_arch=$QPKG_ARCH" >> $GITHUB_OUTPUT
+          echo "kernel_series=$KERNEL_SERIES" >> $GITHUB_OUTPUT
+
+          echo "driver_version=$DRIVER_VERSION" >> $GITHUB_OUTPUT
+          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
+          echo "qts_version=$QTS_VERSION" >> $GITHUB_OUTPUT
+          echo "qpkg_version=$QPKG_VERSION" >> $GITHUB_OUTPUT
+          echo "docker_tag=$DOCKER_TAG" >> $GITHUB_OUTPUT
+
+          echo "Building QPKG version: $QPKG_VERSION"
+          echo "  Driver: $DRIVER_VERSION"
+          echo "  Kernel: $KERNEL_VERSION"
+          echo "  QTS: $QTS_VERSION"
+          echo "  Docker tag: $DOCKER_TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache GPL source
+        if: github.event.inputs.force_rebuild != 'true'
+        uses: actions/cache@v4
+        with:
+          path: GPL_QTS/
+          key: gpl-${{ hashFiles('versions.yml') }}
+          restore-keys: gpl-
+
+      - name: Cache Docker layers
+        if: github.event.inputs.force_rebuild != 'true'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-${{ steps.get_version.outputs.docker_tag }}
+          restore-keys: |
+            buildx-qts-${{ steps.get_version.outputs.qts_version }}-
+
+      - name: Prepare GPL source
+        run: ./prepare_gpl_source.sh
+
+      - name: Build Docker image with cache
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: rtl8125-builder:${{ steps.get_version.outputs.docker_tag }}
+          build-args: |
+            TARGET_MODEL=${{ steps.get_version.outputs.target_model }}
+            KERNEL_SERIES=${{ steps.get_version.outputs.kernel_series }}
+            KERNEL_CONFIG_FILE=${{ steps.get_version.outputs.kernel_config_file }}
+            KERNEL_VERSION=${{ steps.get_version.outputs.kernel_version }}
+            KERNEL_ARCH=${{ steps.get_version.outputs.kernel_arch }}
+            CROSS_COMPILE_PREFIX=${{ steps.get_version.outputs.cross_compile_prefix }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Build driver
+        run: |
+          export DOCKER_TAG="${{ steps.get_version.outputs.docker_tag }}"
+          export QPKG_VERSION="${{ steps.get_version.outputs.qpkg_version }}"
+          bash build.sh driver
+
+      - name: Create QPKG
+        run: |
+          export DOCKER_TAG="${{ steps.get_version.outputs.docker_tag }}"
+          export QPKG_VERSION="${{ steps.get_version.outputs.qpkg_version }}"
+          bash build.sh qpkg
+
+      - name: Move cache
+        if: github.event.inputs.force_rebuild != 'true'
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: List built artifacts
+        if: always()
+        run: |
+          echo "Built artifacts:"
+          echo "================"
+          if [ -d "output" ]; then
+            echo "Output directory structure:"
+            find output -type f -exec ls -lh {} \;
+            echo ""
+            echo "Summary:"
+            ls -lh output/ 2>/dev/null || echo "No files in output/"
+            ls -lh output/driver/ 2>/dev/null || echo "No driver files"
+            ls -lh output/*.qpkg 2>/dev/null || echo "No QPKG files"
+          else
+            echo "ERROR: output directory does not exist"
+          fi
+
+      - name: Create GitHub Release and Upload Assets
+        if: github.event_name == 'push' || github.event.inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          name: RTL8125 Driver ${{ steps.get_version.outputs.qpkg_version }}
+          body: |
+            ## RTL8125 2.5GbE Ethernet Driver for QNAP
+
+            **Package Version**: ${{ steps.get_version.outputs.qpkg_version }}
+            **Driver Version**: ${{ steps.get_version.outputs.driver_version }}
+            **Build Date**: ${{ github.event.head_commit.timestamp }}
+
+            ### Installation
+
+            1. Download the QPKG file for your architecture
+            2. Upload to QNAP App Center
+            3. Install the package
+            4. Verify installation: `lsmod | grep r8125`
+
+            ### Compatibility
+
+            - **QTS**: 4.2.0+
+            - **QuTS hero**: h5.2.0+
+            - **Architecture**: arm64 (aarch64)
+            - **Model**: TS-433 and other TS-x33 family NAS
+            - **Kernel**: 5.10.60
+
+            ### Changes
+
+            See commit history for detailed changes.
+
+            ---
+
+            Built automatically by GitHub Actions.
+          files: |
+            output/*.qpkg
+          draft: false
+          prerelease: false
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qpkg-packages
+          path: output/*.qpkg
+          retention-days: 30

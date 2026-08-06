@@ -1,0 +1,39 @@
+# Build output
+output/
+
+# QTS Kernel
+GPL_QTS/
+
+# QPKG build artifacts
+qpkg/RTL8125_Driver/build/
+qpkg/RTL8125_Driver/arm_64/r8125.ko
+
+# Docker build cache
+.docker/
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# QNAP GPL Kernel Source (user-provided)
+gpl_source/*.tar.gz
+gpl_source/*.tar
+GPL_QTS/
+
+# Temporary files from GPL extraction
+QTS_Kernel_combined.tar.gz
+
+*sec.endpointdlp
+*Zone.Identifier
+
