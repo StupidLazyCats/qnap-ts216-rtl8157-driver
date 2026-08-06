@@ -1,10 +1,11 @@
 # Version configuration for RTL8125 Driver QPKG
 # This file controls all versions and GPL sources used during the build process
 
-# Realtek r8125 driver version to download and compile.
-# This is the upstream Realtek version, and is what gets stamped into the QPKG and
-# reported by `modinfo r8125`.
-driver_version: "9.018.00"
+# NOTE: the Realtek driver version is deliberately NOT configured here. It is read
+# out of RTL8125_VERSION in the src/r8125.h that was actually downloaded, verified
+# against the compiled module's modinfo, and written to output/driver/driver_version
+# - which is then what the QPKG is stamped with. Changing the driver means moving
+# driver_source_tag (or driver_url) below; the version follows on its own.
 
 # Where to fetch the driver source from.
 #
@@ -60,10 +61,10 @@ qpkg_arch: "arm_64"
 target_uname_m: "aarch64"
 
 # Notes:
-# - driver_version: The upstream Realtek r8125 version being packaged
+# - driver_source_tag: which upstream r8125 release gets built (and thus packaged)
 # - gpl_source.urls: Can be 1 or more URLs - will be concatenated in order
 # - target_model: Must match a directory in GPL_QTS/kernel_cfg/
-# - qpkg_version: Derived from git tag (e.g., release-5.55.1b1 -> 5.55.1b1)
+# - qpkg_version: the compiled Realtek version, unless QPKG_VERSION overrides it
 #
 # Unlike the x86_64 build this project started from, QNAP's GPL bundle ships the
 # 5.10 tree pre-built for x86_64 ONLY (vmlinux, Module.symvers and
@@ -72,7 +73,6 @@ target_uname_m: "aarch64"
 # build_kernel.sh.
 #
 # Example:
-# - driver_version: 9.018.00 (actual Realtek r8125 driver)
+# - driver_source_tag: 9.018.00-1 -> source declares RTL8125_VERSION "9.018.00"
 # - gpl_source.kernel_version: 5.10.60 (QNAP kernel)
-# - git tag: release-5.55.1b1
-# - Result: QPKG contains driver 9.016.01, packaged as version 5.55.1b1
+# - Result: RTL8125_Driver_9.018.00_arm_64.qpkg

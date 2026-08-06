@@ -22,7 +22,6 @@ if [ ! -f "versions.yml" ]; then
 fi
 
 # Parse YAML using grep and sed (simple approach, no external dependencies)
-DEFAULT_DRIVER_VERSION=$(grep '^driver_version:' versions.yml | sed 's/driver_version:[[:space:]]*"\(.*\)"/\1/' | tr -d '"' | tr -d "'")
 DEFAULT_KERNEL_VERSION=$(grep '[[:space:]]*kernel_version:' versions.yml | head -1 | sed 's/.*kernel_version:[[:space:]]*"\(.*\)".*/\1/' | tr -d '"' | tr -d "'")
 
 # Target platform, also from versions.yml. These drive both the kernel build
@@ -38,11 +37,6 @@ QPKG_ARCH=$(read_key qpkg_arch)
 DEFAULT_DRIVER_SOURCE_TAG=$(read_key driver_source_tag)
 DEFAULT_DRIVER_URL=$(read_key driver_url)
 
-if [ -z "${DEFAULT_DRIVER_VERSION}" ]; then
-    echo "ERROR: could not read 'driver_version' from versions.yml"
-    exit 1
-fi
-
 for _k in TARGET_MODEL KERNEL_CONFIG_FILE KERNEL_ARCH CROSS_COMPILE_PREFIX QPKG_ARCH; do
     eval "_v=\$$_k"
     if [ -z "${_v}" ]; then
@@ -56,9 +50,7 @@ done
 KERNEL_SERIES=$(echo "${DEFAULT_KERNEL_VERSION}" | cut -d. -f1-2)
 
 # Use environment variables if set, otherwise use values from versions.yml
-DRIVER_VERSION="${DRIVER_VERSION:-${DEFAULT_DRIVER_VERSION}}"
 KERNEL_VERSION="${KERNEL_VERSION:-${DEFAULT_KERNEL_VERSION}}"
-QPKG_VERSION="${QPKG_VERSION:-${DRIVER_VERSION}}"
 DRIVER_SOURCE_TAG="${DRIVER_SOURCE_TAG:-${DEFAULT_DRIVER_SOURCE_TAG}}"
 DRIVER_URL="${DRIVER_URL:-${DEFAULT_DRIVER_URL}}"
 
@@ -67,8 +59,13 @@ if [ -z "${DRIVER_SOURCE_TAG}" ] && [ -z "${DRIVER_URL}" ]; then
     exit 1
 fi
 
+# The Realtek version is not configured anywhere - build_driver.sh reads it out of
+# the source it downloaded and leaves it in output/driver/driver_version, which
+# create_qpkg() picks up. There is no version to print until the driver is built.
+DRIVER_VERSION_FILE="output/driver/driver_version"
+
 echo "Target: QNAP ${TARGET_MODEL} (${KERNEL_ARCH}, kernel ${KERNEL_VERSION}-qnap)"
-echo "Driver: Realtek r8125 ${DRIVER_VERSION}"
+echo "Driver: Realtek r8125 from ${DRIVER_URL:-tag ${DRIVER_SOURCE_TAG}}"
 echo "=========================================="
 
 # Check if Docker is available
@@ -130,19 +127,23 @@ Commands:
   help             - Show this help message
 
 Environment Variables:
-  DRIVER_VERSION    - Realtek r8125 version (default: from versions.yml)
   DRIVER_SOURCE_TAG - Tag to fetch the driver source from (default: from versions.yml)
   DRIVER_URL        - Fetch the driver source from this URL instead of the tag
   KERNEL_VERSION    - Target kernel version (default: from versions.yml)
-  QPKG_VERSION      - QPKG package version (default: same as DRIVER_VERSION)
+  QPKG_VERSION      - QPKG package version (default: the Realtek version that was
+                      compiled, read out of the source by build_driver.sh)
 
 Configuration:
   Defaults live in versions.yml:
-    - driver_version / driver_source_tag / driver_url: the r8125 source
+    - driver_source_tag / driver_url: where the r8125 source comes from
     - kernel_version:  Target kernel version
     - target_model, kernel_config, kernel_arch, cross_compile, qpkg_arch:
       the target platform
   Environment variables override these defaults.
+
+  The Realtek version itself is NOT configured. It is parsed from RTL8125_VERSION
+  in the downloaded src/r8125.h, checked against the compiled module's modinfo, and
+  written to output/driver/driver_version.
 
 Note:
   The aarch64 module is CROSS-compiled from an x86_64 image. QNAP's GPL bundle
@@ -152,7 +153,7 @@ Note:
 Examples:
   $0 all                                    # Full build (uses versions.yml)
   QPKG_VERSION=5.55.1b1 $0 all              # Override QPKG version only
-  DRIVER_VERSION=9.017.00 $0 all            # Override driver version
+  DRIVER_SOURCE_TAG=9.017.00-1 $0 all       # Build a different upstream release
   $0 driver                                  # Compile driver only
   $0 shell                                   # Interactive debugging
 
@@ -236,7 +237,6 @@ compile_driver() {
     # Run build
     docker run --name "${CONTAINER_NAME}" \
         ${VOLUME_MOUNTS} \
-        -e DRIVER_VERSION="${DRIVER_VERSION}" \
         -e DRIVER_SOURCE_TAG="${DRIVER_SOURCE_TAG}" \
         -e DRIVER_URL="${DRIVER_URL}" \
         -e KERNEL_VERSION="${KERNEL_VERSION}" \
@@ -248,6 +248,7 @@ compile_driver() {
         echo ""
         echo "Driver compiled successfully!"
         echo "Location: $(pwd)/output/driver/r8125.ko"
+        echo "Version:  $(cat "${DRIVER_VERSION_FILE}")"
         ls -lh output/driver/r8125.ko
     else
         echo "ERROR: Driver compilation failed!"
@@ -270,6 +271,18 @@ create_qpkg() {
         echo "Run: $0 driver"
         exit 1
     fi
+
+    if [ ! -f "${DRIVER_VERSION_FILE}" ]; then
+        echo "ERROR: ${DRIVER_VERSION_FILE} not found - it is written by build_driver.sh"
+        echo "from the Realtek source it compiled. Rebuild the driver: $0 driver"
+        exit 1
+    fi
+    DRIVER_VERSION=$(cat "${DRIVER_VERSION_FILE}")
+
+    # QPKG_VERSION is overridable for a one-off package revision of the same driver;
+    # left alone it is the upstream Realtek version that was actually compiled.
+    QPKG_VERSION="${QPKG_VERSION:-${DRIVER_VERSION}}"
+    echo "Packaging Realtek r8125 ${DRIVER_VERSION} as QPKG version ${QPKG_VERSION}"
 
     # Validate qpkg source directory exists
     if [ ! -d "qpkg/RTL8125_Driver" ]; then

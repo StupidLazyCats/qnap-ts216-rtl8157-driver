@@ -86,7 +86,7 @@ set_permissions() {
     fi
 
     # Keep the web UI version label in sync with the driver version being packaged
-    # (single source of truth: versions.yml -> DRIVER_VERSION -> here). This re-writes
+    # (single source of truth: src/r8125.h -> build_driver.sh -> here). This re-writes
     # the value regardless of what is currently committed, so it can never drift.
     WEB_INDEX="${QPKG_SOURCE}/shared/web/index.html"
     if [ -n "${DRIVER_VERSION}" ] && [ -f "${WEB_INDEX}" ]; then

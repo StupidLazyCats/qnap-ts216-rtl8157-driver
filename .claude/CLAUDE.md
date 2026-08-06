@@ -411,15 +411,24 @@ ls GPL_QTS/src/linux-5.10/Makefile || ./prepare_gpl_source.sh
 ### Driver version update
 
 ```bash
-# versions.yml: bump driver_version AND driver_source_tag, then
-./sync-version.sh
+# versions.yml: bump driver_source_tag only, then
 ./build.sh all
+./sync-version.sh    # propagate the built version into the committed files
 ```
 
-Note `driver_version` (e.g. `9.018.00`) is the Realtek version and is what gets
-stamped into the QPKG; `driver_source_tag` (e.g. `9.018.00-1`) is the tag fetched.
-They are deliberately separate because the packaging revision can move
-independently.
+`driver_source_tag` (e.g. `9.018.00-1`) is the only version input - it names the
+tag fetched from `awesometic/realtek-r8125-dkms`. The Realtek version itself is
+NOT configured anywhere: `build_driver.sh` parses `RTL8125_VERSION` out of the
+`src/r8125.h` it downloaded (`9.018.00`), asserts the compiled module's
+`modinfo -F version` agrees once the feature suffixes are stripped, and writes it
+to `output/driver/driver_version`. `build.sh create_qpkg()` reads that file and
+stamps it on the package, so the version on the QPKG cannot disagree with the code
+inside it. `QPKG_VERSION=` still overrides for a packaging-only revision.
+
+`sync-version.sh` no longer holds a version of its own; it copies
+`output/driver/driver_version` (or an explicit argument) into `qpkg.cfg`, the web
+UI and the docs. It deliberately does not touch `versions.yml`, since a blind
+substitution there would rewrite `driver_source_tag`.
 
 ### New QTS version / kernel
 

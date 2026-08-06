@@ -6,9 +6,11 @@ KERNEL_VERSION="${KERNEL_VERSION:-5.10.60}"
 KERNEL_SRC="${KERNEL_SRC:-/build/kernel/linux-source}"
 ARCH="${ARCH:-arm64}"
 CROSS_COMPILE="${CROSS_COMPILE:-aarch64-linux-gnu-}"
-# DRIVER_VERSION is provided by build.sh from versions.yml (the single source of truth).
-# Fail loudly if it is missing rather than silently building a stale/hardcoded version.
-: "${DRIVER_VERSION:?DRIVER_VERSION must be set (normally passed by build.sh from versions.yml)}"
+# DRIVER_VERSION is NOT an input. It is read out of the Realtek source that was
+# actually downloaded (see download_driver_source) and written to
+# output/driver/driver_version for build.sh to package with, so the version stamped
+# on the QPKG can never disagree with the code inside it.
+#
 # DRIVER_URL is optional. When set it wins, so a Realtek direct link or a local
 # mirror can be used instead of the default tag archive - see versions.yml. Only
 # one of the two is needed, hence the tag is required only as the fallback.
@@ -31,7 +33,7 @@ echo "==================================="
 echo "RTL8125 Driver Build for QNAP arm64"
 echo "==================================="
 echo "Kernel Version: ${KERNEL_VERSION}"
-echo "Driver Version: ${DRIVER_VERSION}"
+echo "Driver source:  ${REALTEK_DRIVER_URL}"
 echo "Target arch:    ${ARCH} (cross: ${CROSS_COMPILE})"
 echo "==================================="
 
@@ -82,7 +84,7 @@ download_driver_source() {
     mkdir -p /build/driver/src-tree
     cd /build/driver
 
-    TARBALL="r8125-${DRIVER_VERSION}.tar.gz"
+    TARBALL="r8125-${DRIVER_SOURCE_TAG:-source}.tar.gz"
 
     if [ ! -f "${TARBALL}" ]; then
         if ! wget -O "${TARBALL}" "${REALTEK_DRIVER_URL}"; then
@@ -107,7 +109,19 @@ download_driver_source() {
         exit 1
     fi
 
+    # The version is whatever this source says it is. r8125.h:598 reads
+    #   #define RTL8125_VERSION "9.018.00" NAPI_SUFFIX DASH_SUFFIX ... RSS_SUFFIX
+    # so the leading quoted literal is the Realtek release; the suffixes are macros
+    # resolved from the feature flags and are appended to what modinfo reports.
+    DRIVER_VERSION=$(sed -n 's/^#define[[:space:]]\+RTL8125_VERSION[[:space:]]\+"\([0-9][0-9.]*\)".*/\1/p' src/r8125.h | head -1)
+    if [ -z "${DRIVER_VERSION}" ]; then
+        echo "ERROR: could not read RTL8125_VERSION from src/r8125.h"
+        grep -n 'RTL8125_VERSION' src/r8125.h || true
+        exit 1
+    fi
+
     echo "✓ Driver source: $(pwd)"
+    echo "  Upstream version: ${DRIVER_VERSION}"
 }
 
 # Function to configure driver build options
@@ -295,7 +309,16 @@ verify_module() {
         exit 1
     fi
 
-    echo "  version:  $(modinfo -F version "${KO}")"
+    # The QPKG is stamped with DRIVER_VERSION as parsed out of r8125.h, so confirm
+    # the compiled object agrees. modinfo reports the version with the feature
+    # suffixes appended (e.g. 9.018.00-NAPI-DASH-RSS), hence comparing the head.
+    MODULE_VERSION=$(modinfo -F version "${KO}")
+    echo "  version:  ${MODULE_VERSION}"
+    if [ "${MODULE_VERSION%%-*}" != "${DRIVER_VERSION}" ]; then
+        echo "ERROR: built module reports ${MODULE_VERSION%%-*}, but the source parsed as ${DRIVER_VERSION}"
+        exit 1
+    fi
+
     echo "  srcversion: $(modinfo -F srcversion "${KO}")"
     echo "✓ Module verified"
 }
@@ -310,8 +333,13 @@ prepare_output() {
     # Get driver info
     modinfo "src/${DRIVER_NAME}.ko" > /build/output/driver/module_info.txt || true
 
+    # How the version reaches packaging: build_qpkg.sh runs in a separate container
+    # and cannot see the source tree, so hand it across on the shared output volume.
+    echo "${DRIVER_VERSION}" > /build/output/driver/driver_version
+
     echo "Driver build complete!"
     echo "Output location: /build/output/driver/${DRIVER_NAME}.ko"
+    echo "Version:         ${DRIVER_VERSION}"
 }
 
 # Main build process
