@@ -399,6 +399,37 @@ be honest about not working:
 `"0"`, which does not match that format and asked QTS to wait zero seconds for a
 start that loads a kernel module.
 
+### `Enable = FALSE` is sticky, and reinstalling does not clear it
+
+This was the actual cause of "loads on install, stock driver after every reboot",
+diagnosed on the TS-433 with `Enable = FALSE` in `/etc/config/qpkg.conf` and a
+`service.log` containing three `stop` entries, one `is disabled`, and no `start:`
+line at all. QDK's install flow is:
+
+```
+pre_install()  -> get_qpkg_status   # SYS_QPKG_SERVICE_ENABLED=$(getcfg Enable -d TRUE)  :1467
+post_install() -> pkg_post_install  # our unconditional insmod                            :1502
+main           -> set_qpkg_status                                                         :1555
+
+set_qpkg_status(){                                                                        # :749
+    if [ "$SYS_QPKG_SERVICE_ENABLED" = "TRUE" ]; then enable_qpkg; start_service || disable_qpkg
+    else disable_qpkg
+    fi
+}
+```
+
+The pre-install value is written back after the install, so a package switched off
+in App Center once stays off forever. Every reinstall still appears to work,
+because `pkg_post_install` insmods the driver whether or not the package is
+enabled, while the boot path checks `Enable` and refuses.
+
+`pkg_post_install` therefore sets `SYS_QPKG_SERVICE_ENABLED="TRUE"`. It is sourced
+into qinstall's own shell (`call_defined_routine`, `:1410`) and runs before
+`set_qpkg_status`, so the variable, not a `setcfg`, is what has effect - a `setcfg`
+here would just be overwritten a few lines later. Installing this package means
+enabling it: it is a driver replacement with no meaningful off state, and its
+`stop` does not even unload the module.
+
 ## Troubleshooting
 
 ### Verify the correct module is loaded
@@ -568,7 +599,11 @@ correlate with the dips.
 
 IRQ tuning was tried and REMOVED from the QPKG because it failed its own test -
 see `r8125-tune.sh`, kept as a diagnostic tool.
-- [ ] Survives a reboot (the QPKG autoload path has not been exercised)
+- [x] `RTL8125_Driver.sh start` swaps the stock driver for ours and verifies it:
+      first success logged on a TS-433 at 17:10:36, `9.018.00-NAPI-DASH-RSS`
+      loaded with srcversion matching the packaged `.ko`
+- [ ] Survives a reboot (QTS invoking that same script at boot is the one step
+      still unexercised)
 - [ ] Whether the second TX vector actually takes load under traffic (the ring
       exists; the counters in `/proc/interrupts` are what prove it is used)
 

@@ -159,7 +159,20 @@ pkg_post_install(){
     # Nothing is written to /etc/rc.local: on QTS /etc is a ramdisk rebuilt from
     # the firmware image on every boot, so an edit there is writable, appears to
     # succeed, and is gone by the time it would have run.
-    log "Auto-load on boot is handled by the QPKG service (${QPKG_NAME}.sh start)"
+    # QTS only runs the boot-time service for packages with Enable = TRUE in
+    # /etc/config/qpkg.conf, and QDK carries the old value across an upgrade:
+    # pre_install captures it into SYS_QPKG_SERVICE_ENABLED (qinstall.sh:1467) and
+    # set_qpkg_status writes it back after this routine returns (qinstall.sh:749).
+    # So once the package has been switched off in App Center it stays off and
+    # reinstalling cannot clear it, which reads as "install works, reboot does not"
+    # because the insmod above is unconditional while the boot path is not.
+    #
+    # This package is a driver replacement with no meaningful disabled state - its
+    # stop does not even unload the module - so installing it means enabling it.
+    # pkg_post_install runs in qinstall's own shell (call_defined_routine, :1410),
+    # so the variable set here is what set_qpkg_status acts on.
+    SYS_QPKG_SERVICE_ENABLED="TRUE"
+    log "Auto-load on boot: enabling the QPKG service (${QPKG_NAME}.sh start)"
 
     # Left behind by earlier builds of this package, which wrote a script that
     # nothing ever invoked.
