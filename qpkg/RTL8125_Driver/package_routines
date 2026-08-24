@@ -152,44 +152,14 @@ pkg_post_install(){
         log "ERROR: Driver file not found at ${DRIVER_PATH}"
     fi
 
-    # Configure auto-load on boot using QNAP's method with forced reload
-    # QNAP uses /etc/config/modules.conf or rc.local for boot scripts
-    AUTORUN_CONF="/etc/config/autorun.conf"
-    RC_LOCAL="/etc/rc.local"
-
-    # Create auto-load command that loads from QPKG directory. The modprobe tail
-    # matters after a QTS kernel bump: insmod will refuse a module built for the
-    # old release, and without it the NIC would be left with no driver at all.
-    AUTOLOAD_CMD="rmmod r8125 2>/dev/null; insmod ${QPKG_ROOT}/${DRIVER_FILE} 2>/dev/null || modprobe r8125 2>/dev/null"
-
-    # Method 1: Try to add to rc.local if it exists and is writable
-    if [ -f "${RC_LOCAL}" ] && [ -w "${RC_LOCAL}" ]; then
-        # Check if our entry already exists
-        if ! grep -q "RTL8125 Driver auto-load" "${RC_LOCAL}"; then
-            # Add before the last line (usually 'exit 0') with forced reload
-            sed -i "/^exit 0/i # RTL8125 Driver auto-load (with cache clear)\n${AUTOLOAD_CMD}" "${RC_LOCAL}" 2>/dev/null && \
-                log "Auto-load on boot configured: ${RC_LOCAL} (with forced reload)" || \
-                log "WARNING: Could not modify ${RC_LOCAL}"
-        else
-            log "Auto-load already configured in ${RC_LOCAL}"
-        fi
-    # Method 2: Try QNAP's autorun.conf if it exists
-    elif [ -f "${AUTORUN_CONF}" ] && [ -w "${AUTORUN_CONF}" ]; then
-        if ! grep -q "RTL8125 Driver" "${AUTORUN_CONF}"; then
-            echo "${AUTOLOAD_CMD} # RTL8125 Driver (forced reload)" >> "${AUTORUN_CONF}" && \
-                log "Auto-load on boot configured: ${AUTORUN_CONF} (with forced reload)" || \
-                log "WARNING: Could not modify ${AUTORUN_CONF}"
-        else
-            log "Auto-load already configured in ${AUTORUN_CONF}"
-        fi
-    else
-        # Neither file is writable on this unit. Nothing more to do: QTS starts
-        # enabled QPKGs at boot via QPKG_SERVICE_PROGRAM, so RTL8125_Driver.sh
-        # start loads the driver, and it does the same vermagic check and
-        # modprobe fallback as the commands above.
-        log "${RC_LOCAL} and ${AUTORUN_CONF} are not writable"
-        log "Driver will auto-load via the QPKG service on boot"
-    fi
+    # Auto-load on boot is QTS's job: it runs QPKG_SERVICE_PROGRAM with "start"
+    # for every enabled QPKG once the data volume is up, and RTL8125_Driver.sh
+    # does the vermagic check and the srcversion verification there.
+    #
+    # Nothing is written to /etc/rc.local: on QTS /etc is a ramdisk rebuilt from
+    # the firmware image on every boot, so an edit there is writable, appears to
+    # succeed, and is gone by the time it would have run.
+    log "Auto-load on boot is handled by the QPKG service (${QPKG_NAME}.sh start)"
 
     # Left behind by earlier builds of this package, which wrote a script that
     # nothing ever invoked.

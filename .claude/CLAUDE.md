@@ -277,9 +277,10 @@ package name, so the output is `RTL8125_Driver_<ver>_arm_64.qpkg`.
   briefly during install. The TS-433 has a second (1GbE) NIC.
 - Boot order, from dmesg on a TS-433: QTS loads stock `9.007.01-NAPI` at ~t=22s
   and it becomes `eth0` (via an `eth1` -> `eth1_tmp_NNNNN` -> `eth0` rename
-  dance). The QPKG service swaps in ours later, once the data volume is mounted -
-  observed at t=400s on a boot that included a volume check. So the netdev index
-  ends up high (7) and the driver version only changes minutes into boot.
+  dance). The QPKG service is meant to swap in ours later, once the data volume is
+  mounted - a t=400s swap was observed on a boot that included a volume check. On
+  a plain reboot it does NOT happen: stock `9.007.01` is still the loaded module
+  and the package has to be reinstalled by hand. See "Autoload on boot" below.
 - The NIC sits behind PCIe3 (`pcie@fe280000` / `3c0800000.pcie`, bus `0002:20`).
   `rockchip-snps-pcie3-phy fe8c0000.phy: failed to find rockchip,pipe_grf regmap`
   at ~t=3s is BENIGN - it appears on healthy boots too. The line that actually
@@ -360,6 +361,43 @@ Ignore `rockchip-snps-pcie3-phy fe8c0000.phy: failed to find rockchip,pipe_grf
 regmap` - it appears on healthy boots too and is not the fault.
 
 ---
+
+## Autoload on boot
+
+The ONLY mechanism that persists is `QPKG_SERVICE_PROGRAM`: QDK's `qinstall.sh`
+writes `Shell = <install path>/RTL8125_Driver.sh` into `/etc/config/qpkg.conf`
+(`qinstall.sh:720`) and QTS runs it with `start` for every `Enable = TRUE` package
+at boot. `QPKG_RC_NUM` is only a preference - QDK's own developer guide says QTS
+reassigns the number from the order in `qpkg.conf` after a reboot.
+
+Do not write boot commands into `/etc/rc.local`. On QTS `/etc` is a ramdisk rebuilt
+from the firmware image on every boot; only `/etc/config` is on the DOM. The edit
+is writable, `sed` reports success, and it is gone before it would have run. An
+earlier `package_routines` did exactly this and logged "Auto-load on boot
+configured" while nothing was configured at all. `/etc/config/autorun.conf` is not
+a QNAP file either (the real hook is `autorun.sh` on the DOM, gated on a Control
+Panel setting), so that fallback never fired.
+
+`RTL8125_Driver.sh start` therefore has to be the thing that works, and it has to
+be honest about not working:
+
+- It prepends `/sbin:/bin:/usr/sbin:/usr/bin` to `PATH`. QTS starts services at
+  boot with a minimal one, and without this `lsmod`/`insmod`/`rmmod` are all
+  "command not found" and every step silently no-ops.
+- It logs every decision to `<install path>/service.log`. Nothing captures the
+  script's stdout on an unattended boot, so this file is the only record.
+- It verifies by `srcversion` and exits non-zero if the loaded module is not ours.
+  The old version checked `lsmod | grep -q "^r8125 "` - presence, not identity - so
+  the `insmod ... || modprobe r8125` fallback reloading the STOCK driver was
+  reported as "started successfully (driver loaded)", which is exactly the state
+  this package exists to replace.
+- A missing `r8125.ko` is a logged error, not a silent skip: the package lives on
+  the data volume, and being started before that volume mounts is a real candidate
+  for the boot-time failure.
+
+`QPKG_TIMEOUT` is `"start_timeout,stop_timeout"` in seconds. It used to be a bare
+`"0"`, which does not match that format and asked QTS to wait zero seconds for a
+start that loads a kernel module.
 
 ## Troubleshooting
 
