@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realtek USB Ethernet Driver</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.5; color: #252525; margin: 32px; }
+        main { max-width: 720px; margin: 0 auto; }
+        h1 { color: #1261a0; }
+        code { background: #f1f3f5; padding: 2px 5px; }
+        .warning { border-left: 4px solid #c58a00; padding-left: 12px; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Realtek USB Ethernet Driver</h1>
+    <p><strong>Driver version:</strong> 2.20.1</p>
+    <p><strong>Target:</strong> QNAP TS-216/TS-416 (TS-X16), QTS 5.2.0, kernel 5.10.60-qnap, aarch64</p>
+    <p>This package installs the Realtek <code>r8152</code> USB Ethernet driver with support for RTL8152, RTL8153, RTL8155, RTL8156, and RTL8157 devices. RTL8157 uses USB ID <code>0bda:8157</code>.</p>
+    <p class="warning">A QTS firmware update may change the kernel. Do not load this module unless its vermagic exactly matches the running kernel.</p>
+    <h2>Verification</h2>
+    <pre>lsusb
+lsmod | grep r8152
+cat /sys/module/r8152/version
+dmesg | grep -iE 'r8152|rtl8157'</pre>
+    <p>The TS-216 USB 3.2 Gen 1 port has a raw 5 Gbps bus rate, so sustained 5GbE line rate is not expected.</p>
+</main>
+</body>
+</html>

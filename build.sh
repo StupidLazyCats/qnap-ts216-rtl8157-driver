@@ -1,16 +1,16 @@
 #!/bin/bash
 set -e
 
-# Main build orchestration script for RTL8125 driver QPKG
+# Main build orchestration script for RTL8152 driver QPKG
 
 echo "=========================================="
-echo "RTL8125 Driver QPKG Build System"
+echo "RTL8152 Driver QPKG Build System"
 echo "=========================================="
 
 # Configuration
-DOCKER_IMAGE="rtl8125-builder"
+DOCKER_IMAGE="rtl8152-builder"
 DOCKER_TAG="${DOCKER_TAG:-latest}"  # Allow override from environment
-CONTAINER_NAME="rtl8125-build"
+CONTAINER_NAME="rtl8152-build"
 
 # Load versions from versions.yml (the single source of truth for all versions).
 # There are intentionally NO hardcoded version fallbacks here: a missing or garbled
@@ -34,7 +34,7 @@ KERNEL_CONFIG_FILE=$(read_key kernel_config)
 KERNEL_ARCH=$(read_key kernel_arch)
 CROSS_COMPILE_PREFIX=$(read_key cross_compile)
 QPKG_ARCH=$(read_key qpkg_arch)
-DEFAULT_DRIVER_SOURCE_TAG=$(read_key driver_source_tag)
+DEFAULT_DRIVER_SOURCE_REF=$(read_key driver_source_ref)
 DEFAULT_DRIVER_URL=$(read_key driver_url)
 
 for _k in TARGET_MODEL KERNEL_CONFIG_FILE KERNEL_ARCH CROSS_COMPILE_PREFIX QPKG_ARCH; do
@@ -51,11 +51,11 @@ KERNEL_SERIES=$(echo "${DEFAULT_KERNEL_VERSION}" | cut -d. -f1-2)
 
 # Use environment variables if set, otherwise use values from versions.yml
 KERNEL_VERSION="${KERNEL_VERSION:-${DEFAULT_KERNEL_VERSION}}"
-DRIVER_SOURCE_TAG="${DRIVER_SOURCE_TAG:-${DEFAULT_DRIVER_SOURCE_TAG}}"
+DRIVER_SOURCE_REF="${DRIVER_SOURCE_REF:-${DEFAULT_DRIVER_SOURCE_REF}}"
 DRIVER_URL="${DRIVER_URL:-${DEFAULT_DRIVER_URL}}"
 
-if [ -z "${DRIVER_SOURCE_TAG}" ] && [ -z "${DRIVER_URL}" ]; then
-    echo "ERROR: versions.yml must set driver_source_tag (or driver_url)"
+if [ -z "${DRIVER_SOURCE_REF}" ] && [ -z "${DRIVER_URL}" ]; then
+    echo "ERROR: versions.yml must set driver_source_ref (or driver_url)"
     exit 1
 fi
 
@@ -65,7 +65,7 @@ fi
 DRIVER_VERSION_FILE="output/driver/driver_version"
 
 echo "Target: QNAP ${TARGET_MODEL} (${KERNEL_ARCH}, kernel ${KERNEL_VERSION}-qnap)"
-echo "Driver: Realtek r8125 from ${DRIVER_URL:-tag ${DRIVER_SOURCE_TAG}}"
+echo "Driver: Realtek r8152 from ${DRIVER_URL:-ref ${DRIVER_SOURCE_REF}}"
 echo "=========================================="
 
 # Check if Docker is available
@@ -103,7 +103,7 @@ check_gpl_source() {
             echo "✗ Error: GPL source preparation failed"
             echo ""
             echo "Please download GPL archives manually:"
-            echo "  1. Visit: https://sourceforge.net/projects/qosgpl/files/QNAP%20NAS%20GPL%20Source/QTS%205.2.3/"
+            echo "  1. Visit: https://sourceforge.net/projects/qosgpl/files/QNAP%20NAS%20GPL%20Source/QTS%205.2.0/"
             echo "  2. Download both parts: QTS_Kernel_*.0.tar.gz and QTS_Kernel_*.1.tar.gz"
             echo "  3. Place them in: gpl_source/"
             echo "  4. Run: ./prepare_gpl_source.sh"
@@ -127,7 +127,7 @@ Commands:
   help             - Show this help message
 
 Environment Variables:
-  DRIVER_SOURCE_TAG - Tag to fetch the driver source from (default: from versions.yml)
+  DRIVER_SOURCE_REF - Commit, tag, or branch to fetch (default: from versions.yml)
   DRIVER_URL        - Fetch the driver source from this URL instead of the tag
   KERNEL_VERSION    - Target kernel version (default: from versions.yml)
   QPKG_VERSION      - QPKG package version (default: the Realtek version that was
@@ -135,15 +135,14 @@ Environment Variables:
 
 Configuration:
   Defaults live in versions.yml:
-    - driver_source_tag / driver_url: where the r8125 source comes from
+    - driver_source_ref / driver_url: where the r8152 source comes from
     - kernel_version:  Target kernel version
     - target_model, kernel_config, kernel_arch, cross_compile, qpkg_arch:
       the target platform
   Environment variables override these defaults.
 
-  The Realtek version itself is NOT configured. It is parsed from RTL8125_VERSION
-  in the downloaded src/r8125.h, checked against the compiled module's modinfo, and
-  written to output/driver/driver_version.
+  The Realtek version itself is NOT configured. It is parsed from DRIVER_VERSION
+  in the downloaded r8152.c and written to output/driver/driver_version.
 
 Note:
   The aarch64 module is CROSS-compiled from an x86_64 image. QNAP's GPL bundle
@@ -153,16 +152,16 @@ Note:
 Examples:
   $0 all                                    # Full build (uses versions.yml)
   QPKG_VERSION=5.55.1b1 $0 all              # Override QPKG version only
-  DRIVER_SOURCE_TAG=9.017.00-1 $0 all       # Build a different upstream release
+  DRIVER_SOURCE_REF=main $0 all             # Build a different upstream ref
   $0 driver                                  # Compile driver only
   $0 shell                                   # Interactive debugging
 
 Icons:
-  Icons are located in qpkg/RTL8125_Driver/icons/ directory.
+  Icons are located in qpkg/RTL8152_Driver/icons/ directory.
   Required files (64x64 GIF for standard, 80x80 for dialog):
-    - RTL8125_Driver.gif (enabled state)
-    - RTL8125_Driver_gray.gif (disabled state)
-    - RTL8125_Driver_80.gif (80x80, dialog popup)
+    - RTL8152_Driver.gif (enabled state)
+    - RTL8152_Driver_gray.gif (disabled state)
+    - RTL8152_Driver_80.gif (80x80, dialog popup)
   These files are included in the qpkg source template.
 
 EOF
@@ -223,7 +222,7 @@ build_image() {
 # Function to compile driver
 compile_driver() {
     echo ""
-    echo "[Step 2/3] Compiling RTL8125 driver..."
+    echo "[Step 2/3] Compiling RTL8152 driver..."
     echo "=========================================="
     echo "Using QNAP GPL kernel source from Docker image"
     echo "  (built for ${KERNEL_ARCH} during image build)"
@@ -237,19 +236,19 @@ compile_driver() {
     # Run build
     docker run --name "${CONTAINER_NAME}" \
         ${VOLUME_MOUNTS} \
-        -e DRIVER_SOURCE_TAG="${DRIVER_SOURCE_TAG}" \
+        -e DRIVER_SOURCE_REF="${DRIVER_SOURCE_REF}" \
         -e DRIVER_URL="${DRIVER_URL}" \
         -e KERNEL_VERSION="${KERNEL_VERSION}" \
         "${DOCKER_IMAGE}:${DOCKER_TAG}" \
         /bin/bash -c "/build/build_driver.sh"
 
     # Check if driver was built
-    if [ -f "output/driver/r8125.ko" ]; then
+    if [ -f "output/driver/r8152.ko" ]; then
         echo ""
         echo "Driver compiled successfully!"
-        echo "Location: $(pwd)/output/driver/r8125.ko"
+        echo "Location: $(pwd)/output/driver/r8152.ko"
         echo "Version:  $(cat "${DRIVER_VERSION_FILE}")"
-        ls -lh output/driver/r8125.ko
+        ls -lh output/driver/r8152.ko
     else
         echo "ERROR: Driver compilation failed!"
         exit 1
@@ -266,7 +265,7 @@ create_qpkg() {
     echo "=========================================="
 
     # Check if driver exists
-    if [ ! -f "output/driver/r8125.ko" ]; then
+    if [ ! -f "output/driver/r8152.ko" ]; then
         echo "ERROR: Driver not found! Please compile the driver first."
         echo "Run: $0 driver"
         exit 1
@@ -282,11 +281,11 @@ create_qpkg() {
     # QPKG_VERSION is overridable for a one-off package revision of the same driver;
     # left alone it is the upstream Realtek version that was actually compiled.
     QPKG_VERSION="${QPKG_VERSION:-${DRIVER_VERSION}}"
-    echo "Packaging Realtek r8125 ${DRIVER_VERSION} as QPKG version ${QPKG_VERSION}"
+    echo "Packaging Realtek r8152 ${DRIVER_VERSION} as QPKG version ${QPKG_VERSION}"
 
     # Validate qpkg source directory exists
-    if [ ! -d "qpkg/RTL8125_Driver" ]; then
-        echo "ERROR: QPKG source template not found at qpkg/RTL8125_Driver"
+    if [ ! -d "qpkg/RTL8152_Driver" ]; then
+        echo "ERROR: QPKG source template not found at qpkg/RTL8152_Driver"
         echo "Current directory: $(pwd)"
         echo "Directory contents:"
         ls -la qpkg/ || echo "qpkg directory does not exist"
@@ -294,18 +293,18 @@ create_qpkg() {
     fi
 
     # Validate required template files
-    if [ ! -f "qpkg/RTL8125_Driver/qpkg.cfg" ]; then
+    if [ ! -f "qpkg/RTL8152_Driver/qpkg.cfg" ]; then
         echo "ERROR: qpkg.cfg not found in template"
         exit 1
     fi
 
-    if [ ! -f "qpkg/RTL8125_Driver/package_routines" ]; then
+    if [ ! -f "qpkg/RTL8152_Driver/package_routines" ]; then
         echo "ERROR: package_routines not found in template"
         exit 1
     fi
 
-    if [ ! -f "qpkg/RTL8125_Driver/shared/RTL8125_Driver.sh" ]; then
-        echo "ERROR: RTL8125_Driver.sh not found in template"
+    if [ ! -f "qpkg/RTL8152_Driver/shared/RTL8152_Driver.sh" ]; then
+        echo "ERROR: RTL8152_Driver.sh not found in template"
         exit 1
     fi
 
@@ -321,7 +320,7 @@ create_qpkg() {
     QPKG_VOLUME_MOUNTS="${QPKG_VOLUME_MOUNTS} -v $(pwd)/qpkg:/qpkg_source"
 
     # Run QPKG creation with template-based approach
-    # Icons are now part of the qpkg/RTL8125_Driver/icons/ directory
+    # Icons are now part of the qpkg/RTL8152_Driver/icons/ directory
     docker run --name "${CONTAINER_NAME}-qpkg" \
         ${QPKG_VOLUME_MOUNTS} \
         -e DRIVER_VERSION="${DRIVER_VERSION}" \
@@ -331,7 +330,7 @@ create_qpkg() {
         /bin/bash -c "/build/build_qpkg.sh"
 
     # Find the generated QPKG file
-    QPKG_FILE="output/RTL8125_Driver_${QPKG_VERSION}_${QPKG_ARCH}.qpkg"
+    QPKG_FILE="output/RTL8152_Driver_${QPKG_VERSION}_${QPKG_ARCH}.qpkg"
 
     if [ -f "${QPKG_FILE}" ]; then
         echo ""

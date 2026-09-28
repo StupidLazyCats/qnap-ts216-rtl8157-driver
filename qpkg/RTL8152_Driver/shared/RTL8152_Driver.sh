@@ -1,6 +1,6 @@
 #!/bin/sh
 CONF=/etc/config/qpkg.conf
-QPKG_NAME="RTL8125_Driver"
+QPKG_NAME="RTL8152_Driver"
 QPKG_ROOT=$(/sbin/getcfg $QPKG_NAME Install_Path -f ${CONF})
 export QNAP_QPKG=$QPKG_NAME
 
@@ -25,7 +25,7 @@ case "$1" in
     fi
 
     # Load driver from QPKG directory on startup
-    DRIVER_PATH="${QPKG_ROOT}/r8125.ko"
+    DRIVER_PATH="${QPKG_ROOT}/r8152.ko"
     log "start: root='${QPKG_ROOT}' kernel='$(uname -r)'"
 
     # The QPKG lives on the data volume. If the service is started before that
@@ -65,36 +65,36 @@ case "$1" in
     # size and /proc/modules memory footprint do not.
     WANT_SRC=$(strings "${DRIVER_PATH}" 2>/dev/null | grep "^srcversion=" | cut -d= -f2)
 
-    if [ -n "${WANT_SRC}" ] && [ "$(cat /sys/module/r8125/srcversion 2>/dev/null)" = "${WANT_SRC}" ]; then
-        log "our r8125 is already loaded (srcversion ${WANT_SRC}); leaving the link alone"
+    if [ -n "${WANT_SRC}" ] && [ "$(cat /sys/module/r8152/srcversion 2>/dev/null)" = "${WANT_SRC}" ]; then
+        log "our r8152 is already loaded (srcversion ${WANT_SRC}); leaving the link alone"
     else
         # Unload old module if loaded
-        if lsmod | grep -q "^r8125 "; then
-            OUT=$(rmmod r8125 2>&1) || log "ERROR: rmmod r8125 failed: ${OUT}"
+        if lsmod | grep -q "^r8152 "; then
+            OUT=$(rmmod r8152 2>&1) || log "ERROR: rmmod r8152 failed: ${OUT}"
         fi
 
         # Load driver from QPKG directory, falling back to whatever QTS ships
         # so the NIC is never left without a driver.
-        log "Loading r8125 driver from QPKG directory..."
+        log "Loading r8152 driver from QPKG directory..."
         OUT=$(insmod "${DRIVER_PATH}" 2>&1)
         if [ $? -ne 0 ]; then
             log "ERROR: insmod ${DRIVER_PATH} failed: ${OUT}"
             log "falling back to the stock driver"
-            modprobe r8125 2>/dev/null || true
+            modprobe r8152 2>/dev/null || true
         fi
     fi
 
-    LOADED_SRC=$(cat /sys/module/r8125/srcversion 2>/dev/null)
-    LOADED_VER=$(cat /sys/module/r8125/version 2>/dev/null)
+    LOADED_SRC=$(cat /sys/module/r8152/srcversion 2>/dev/null)
+    LOADED_VER=$(cat /sys/module/r8152/version 2>/dev/null)
     if [ -n "${WANT_SRC}" ] && [ "${LOADED_SRC}" = "${WANT_SRC}" ]; then
-        log "$QPKG_NAME started successfully (r8125 ${LOADED_VER} loaded)"
-    elif lsmod | grep -q "^r8125 "; then
+        log "$QPKG_NAME started successfully (r8152 ${LOADED_VER} loaded)"
+    elif lsmod | grep -q "^r8152 "; then
         # Reported as a failure on purpose: a loaded stock driver is the exact
         # end state this package exists to replace, so it must not read as success.
-        log "$QPKG_NAME FAILED: a different r8125 is loaded (version '${LOADED_VER}', srcversion '${LOADED_SRC}'), expected srcversion '${WANT_SRC}'"
+        log "$QPKG_NAME FAILED: a different r8152 is loaded (version '${LOADED_VER}', srcversion '${LOADED_SRC}'), expected srcversion '${WANT_SRC}'"
         exit 1
     else
-        log "$QPKG_NAME FAILED: no r8125 driver is loaded, check dmesg"
+        log "$QPKG_NAME FAILED: no r8152 driver is loaded, check dmesg"
         exit 1
     fi
     ;;

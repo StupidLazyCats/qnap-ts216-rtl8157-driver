@@ -178,7 +178,7 @@ echo "[4/5] Building vmlinux and preparing for external modules..."
 #   modules-only.symvers  exports from loadable modules, written by `make modules`.
 #   Module.symvers        simply cat of the two (scripts/Makefile.modpost).
 #
-# r8125 is a self-contained PCIe NIC driver that imports only built-in kernel
+# r8152 is a self-contained USB NIC driver that imports only built-in kernel
 # exports, so vmlinux.symvers is the complete answer for it and `make modules` is
 # not needed. That matters here beyond build time: QNAP's tree does not survive a
 # full `make modules` under a modern gcc - several of their patched subsystems

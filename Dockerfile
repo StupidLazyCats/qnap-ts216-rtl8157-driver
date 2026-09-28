@@ -1,4 +1,4 @@
-# Dockerfile for cross-building the RTL8125 driver for arm64 QNAP systems (TS-433).
+# Dockerfile for cross-building r8152 for the ARM64 QNAP TS-216/TS-416 family.
 #
 # The image itself is x86_64 and the aarch64 module is CROSS-compiled. This is
 # deliberate rather than a multi-arch/qemu build:
@@ -50,16 +50,15 @@ WORKDIR /build
 
 # Target platform. Supplied by build.sh from versions.yml (the single source of
 # truth); the defaults here only keep a bare `docker build .` working.
-ARG TARGET_MODEL=TS-X33
+ARG TARGET_MODEL=TS-X16
 ARG KERNEL_SERIES=5.10
 ARG KERNEL_CONFIG_FILE=linux-5.10-arm64.config
 ARG KERNEL_VERSION=5.10.60
 ARG KERNEL_ARCH=arm64
 ARG CROSS_COMPILE_PREFIX=aarch64-linux-gnu-
 
-# NOTE: DRIVER_VERSION is intentionally NOT baked in here. It is supplied at runtime
-# (docker run -e DRIVER_VERSION=...) by build.sh, which reads it from versions.yml
-# (the single source of truth). Hardcoding it here would create a stale duplicate.
+# The driver source is downloaded at runtime by build_driver.sh. Keeping it out of
+# this image lets Actions reuse the expensive prepared-kernel layer.
 ENV ARCH=${KERNEL_ARCH}
 ENV CROSS_COMPILE=${CROSS_COMPILE_PREFIX}
 ENV KERNEL_VERSION=${KERNEL_VERSION}

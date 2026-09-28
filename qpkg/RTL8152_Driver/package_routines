@@ -1,12 +1,11 @@
 ######################################################################
-# Package routines for RTL8125 2.5GbE Ethernet Driver
+# Package routines for the Realtek r8152 USB Ethernet driver
 ######################################################################
 
-QPKG_NAME="RTL8125_Driver"
+QPKG_NAME="RTL8152_Driver"
 QPKG_ROOT=$(/sbin/getcfg ${QPKG_NAME} Install_Path -f /etc/config/qpkg.conf)
-DRIVER_FILE="r8125.ko"
+DRIVER_FILE="r8152.ko"
 KERNEL_VERSION=$(uname -r)
-MODULE_DIR="/lib/modules/${KERNEL_VERSION}"
 LOG_FILE="${QPKG_ROOT}/install.log"
 
 # Logging function
@@ -20,21 +19,7 @@ log() {
 ######################################################################
 pkg_pre_install(){
     log "=== Pre-installation started ==="
-
-    # Create module directory
-    mkdir -p "${MODULE_DIR}"
-
-    # Backup existing driver
-    if [ -f "${MODULE_DIR}/${DRIVER_FILE}" ]; then
-        cp "${MODULE_DIR}/${DRIVER_FILE}" "${MODULE_DIR}/${DRIVER_FILE}.backup.$(date +%s)"
-        log "Backed up existing driver"
-    fi
-
-    # Unload existing driver
-    if lsmod | grep -q "^r8125 "; then
-        rmmod r8125 2>/dev/null || modprobe -r r8125 2>/dev/null || true
-        log "Unloaded existing r8125 driver"
-    fi
+    # Compatibility is checked in pkg_install before the active driver is touched.
 }
 
 pkg_install(){
@@ -65,6 +50,25 @@ pkg_install(){
             ;;
     esac
 
+    DRIVER_PATH="${QPKG_ROOT}/${DRIVER_FILE}"
+    FILE_VERMAGIC=$(strings "${DRIVER_PATH}" 2>/dev/null | grep "^vermagic=" | head -1 | cut -d= -f2-)
+    case "${FILE_VERMAGIC}" in
+        "${KERNEL_VERSION} "*)
+            log "Kernel compatibility verified: ${FILE_VERMAGIC}"
+            ;;
+        *)
+            log "ERROR: Module vermagic '${FILE_VERMAGIC}' does not match running kernel '${KERNEL_VERSION}'"
+            log "No loaded driver has been changed. Rebuild for this exact QTS kernel."
+            return 1
+            ;;
+    esac
+
+    if ! strings "${DRIVER_PATH}" 2>/dev/null | grep -qi "alias=usb:v00000BDAp00008157"; then
+        log "ERROR: Packaged module does not advertise RTL8157 USB ID 0bda:8157"
+        return 1
+    fi
+    log "RTL8157 USB ID support verified"
+
     # NOTE: /lib/modules is often read-only on QNAP systems
     # We keep the driver in QPKG directory and load from there
     log "Driver will be loaded from QPKG directory (read-only /lib/modules)"
@@ -84,10 +88,14 @@ pkg_post_install(){
         log "Driver path: ${DRIVER_PATH}"
         log "Driver size: $(ls -lh "${DRIVER_PATH}" 2>/dev/null | awk '{print $5}')"
 
-        # Unload any existing r8125 module completely
-        if lsmod | grep -q "^r8125 "; then
-            log "Unloading existing r8125 module..."
-            rmmod r8125 2>/dev/null || true
+        # Unload only after pkg_install has verified architecture, vermagic, and
+        # the RTL8157 USB alias.
+        if lsmod | grep -q "^r8152 "; then
+            log "Unloading existing r8152 module..."
+            if ! rmmod r8152 2>/dev/null; then
+                log "ERROR: Could not unload the active r8152 module; leaving it in place"
+                return 1
+            fi
             sleep 1
         fi
 
@@ -102,58 +110,58 @@ pkg_post_install(){
             log "Kernel version: $(uname -r)"
 
             # Try to get more error details
-            dmesg | tail -20 | grep -i "r8125\|rtl" | while read line; do
+            dmesg | tail -20 | grep -i "r8152\|rtl" | while read line; do
                 log "  dmesg: $line"
             done 2>/dev/null || true
 
             # We already unloaded the stock driver above, so put something back
             # rather than leaving the NIC with no driver at all.
             log "Restoring the stock driver..."
-            modprobe r8125 2>/dev/null || true
-
-            log "Manual reload command:"
-            log "  sudo insmod ${DRIVER_PATH}"
+            if modprobe r8152 2>/dev/null; then
+                log "Stock r8152 restored"
+            else
+                log "CRITICAL: Could not restore the stock r8152 module"
+            fi
+            return 1
         fi
 
         # Verify driver is loaded using srcversion (NOT size!)
-        if lsmod | grep -q "^r8125 "; then
+        if lsmod | grep -q "^r8152 "; then
             log "Driver module is loaded"
 
             # Get srcversion to verify correct module
-            LOADED_SRC=$(cat /sys/module/r8125/srcversion 2>/dev/null)
+            LOADED_SRC=$(cat /sys/module/r8152/srcversion 2>/dev/null)
             FILE_SRC=$(strings "${DRIVER_PATH}" 2>/dev/null | grep "^srcversion=" | cut -d= -f2)
 
             if [ -n "${LOADED_SRC}" ] && [ -n "${FILE_SRC}" ]; then
                 if [ "${LOADED_SRC}" = "${FILE_SRC}" ]; then
                     log "SUCCESS: Correct module verified (srcversion: ${LOADED_SRC})"
                 else
-                    log "WARNING: Different module loaded!"
+                    log "ERROR: Different module loaded!"
                     log "  Expected srcversion: ${FILE_SRC}"
                     log "  Loaded srcversion: ${LOADED_SRC}"
-                    log "Manual reload command:"
-                    log "  sudo rmmod r8125"
-                    log "  sudo insmod ${DRIVER_PATH}"
+                    return 1
                 fi
             else
                 log "INFO: Cannot verify srcversion (may not be available)"
             fi
 
             # Show module version
-            MODULE_VER=$(cat /sys/module/r8125/version 2>/dev/null)
+            MODULE_VER=$(cat /sys/module/r8152/version 2>/dev/null)
             if [ -n "${MODULE_VER}" ]; then
                 log "Module version: ${MODULE_VER}"
             fi
         else
             log "ERROR: Driver not loaded. Please check dmesg for errors."
-            log "Manual reload command:"
-            log "  sudo insmod ${DRIVER_PATH}"
+            return 1
         fi
     else
         log "ERROR: Driver file not found at ${DRIVER_PATH}"
+        return 1
     fi
 
     # Auto-load on boot is QTS's job: it runs QPKG_SERVICE_PROGRAM with "start"
-    # for every enabled QPKG once the data volume is up, and RTL8125_Driver.sh
+    # for every enabled QPKG once the data volume is up, and RTL8152_Driver.sh
     # does the vermagic check and the srcversion verification there.
     #
     # Nothing is written to /etc/rc.local: on QTS /etc is a ramdisk rebuilt from
@@ -176,26 +184,25 @@ pkg_post_install(){
 
     # Left behind by earlier builds of this package, which wrote a script that
     # nothing ever invoked.
-    if [ -f "${QPKG_ROOT}/rtl8125-autoload.sh" ]; then
-        rm -f "${QPKG_ROOT}/rtl8125-autoload.sh"
-        log "Removed obsolete rtl8125-autoload.sh"
+    if [ -f "${QPKG_ROOT}/rtl8152-autoload.sh" ]; then
+        rm -f "${QPKG_ROOT}/rtl8152-autoload.sh"
+        log "Removed obsolete rtl8152-autoload.sh"
     fi
 
     log "=== Installation completed successfully ==="
     echo ""
     echo "=========================================="
-    echo "RTL8125 Driver installed!"
+    echo "Realtek USB Ethernet Driver installed!"
     echo "=========================================="
-    echo "Features enabled:"
-    echo "  - S5 Wake-on-LAN support"
-    echo "  - Auto-load on boot"
+    echo "RTL8157 support: USB ID 0bda:8157"
+    echo "Auto-load on boot: enabled"
     echo "Log: ${LOG_FILE}"
     echo ""
-    if lsmod | grep -q "^r8125 "; then
+    if lsmod | grep -q "^r8152 "; then
         echo "Status: Driver loaded successfully"
     else
         echo "Status: Driver installed but not loaded"
-        echo "Please run: modprobe r8125"
+        echo "Please run: modprobe r8152"
         echo "Or check: ${LOG_FILE}"
     fi
     echo "=========================================="
@@ -209,33 +216,16 @@ PKG_PRE_REMOVE="{
     log \"=== Pre-removal started ===\"
 
     # Unload driver if loaded
-    if lsmod | grep -q \"^r8125 \"; then
-        log \"Unloading r8125 driver...\"
-        rmmod r8125 2>/dev/null || modprobe -r r8125 2>/dev/null || true
+    if lsmod | grep -q \"^r8152 \"; then
+        log \"Unloading r8152 driver...\"
+        rmmod r8152 2>/dev/null || modprobe -r r8152 2>/dev/null || true
         log \"Driver unloaded\"
     fi
 }"
 
 PKG_MAIN_REMOVE="{
     log \"=== Main removal started ===\"
-
-    # Remove driver file
-    if [ -f \"${MODULE_DIR}/${DRIVER_FILE}\" ]; then
-        rm -f \"${MODULE_DIR}/${DRIVER_FILE}\"
-        log \"Removed driver: ${MODULE_DIR}/${DRIVER_FILE}\"
-    fi
-
-    # Restore backup if exists (most recent backup)
-    BACKUP=\$(ls -t \"${MODULE_DIR}/${DRIVER_FILE}.backup.\"* 2>/dev/null | head -1)
-    if [ -n \"\$BACKUP\" ] && [ -f \"\$BACKUP\" ]; then
-        mv \"\$BACKUP\" \"${MODULE_DIR}/${DRIVER_FILE}\"
-        log \"Restored backup driver: \$BACKUP\"
-    fi
-
-    # Update module dependencies
-    log \"Updating module dependencies...\"
-    depmod -a 2>/dev/null || true
-    log \"Module dependencies updated\"
+    log \"The QPKG copy is removed by QDK; QTS system modules are untouched\"
 }"
 
 PKG_POST_REMOVE="{
@@ -247,36 +237,34 @@ PKG_POST_REMOVE="{
 
     # Remove from rc.local if it exists
     if [ -f \"${RC_LOCAL}\" ] && [ -w \"${RC_LOCAL}\" ]; then
-        if grep -q \"RTL8125 Driver auto-load\" \"${RC_LOCAL}\"; then
-            sed -i '/# RTL8125 Driver auto-load/d' \"${RC_LOCAL}\"
-            sed -i '/modprobe r8125.*RTL8125/d' \"${RC_LOCAL}\"
+        if grep -q \"RTL8152 Driver auto-load\" \"${RC_LOCAL}\"; then
+            sed -i '/# RTL8152 Driver auto-load/d' \"${RC_LOCAL}\"
+            sed -i '/modprobe r8152.*RTL8152/d' \"${RC_LOCAL}\"
             log \"Removed auto-load from ${RC_LOCAL}\"
         fi
     fi
 
     # Remove from autorun.conf if it exists
     if [ -f \"${AUTORUN_CONF}\" ] && [ -w \"${AUTORUN_CONF}\" ]; then
-        if grep -q \"RTL8125 Driver\" \"${AUTORUN_CONF}\"; then
-            sed -i '/modprobe r8125.*RTL8125/d' \"${AUTORUN_CONF}\"
+        if grep -q \"RTL8152 Driver\" \"${AUTORUN_CONF}\"; then
+            sed -i '/modprobe r8152.*RTL8152/d' \"${AUTORUN_CONF}\"
             log \"Removed auto-load from ${AUTORUN_CONF}\"
         fi
     fi
 
     # Remove our init script if it exists
-    if [ -f \"${QPKG_ROOT}/rtl8125-autoload.sh\" ]; then
-        rm -f \"${QPKG_ROOT}/rtl8125-autoload.sh\"
+    if [ -f \"${QPKG_ROOT}/rtl8152-autoload.sh\" ]; then
+        rm -f \"${QPKG_ROOT}/rtl8152-autoload.sh\"
         log \"Removed auto-load script\"
     fi
 
-    # Try to reload original driver if available
-    if [ -f \"${MODULE_DIR}/${DRIVER_FILE}\" ]; then
-        log \"Reloading original driver...\"
-        modprobe r8125 2>/dev/null || true
-        if lsmod | grep -q \"^r8125 \"; then
-            log \"Original driver reloaded successfully\"
-        fi
+    # Reload the module supplied by QTS after the QPKG module is unloaded.
+    log \"Reloading QTS r8152 driver...\"
+    modprobe r8152 2>/dev/null || true
+    if lsmod | grep -q \"^r8152 \"; then
+        log \"QTS driver reloaded successfully\"
     fi
 
     log \"=== Removal completed ===\"
-    echo \"RTL8125 Driver has been removed\"
+    echo \"RTL8152 Driver has been removed\"
 }"

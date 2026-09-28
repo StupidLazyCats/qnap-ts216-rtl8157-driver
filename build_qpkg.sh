@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-QPKG_NAME="RTL8125_Driver"
+QPKG_NAME="RTL8152_Driver"
 # QDK architecture directory name, passed by build.sh from versions.yml. qbuild
 # discovers the target arch from the presence of this directory and stamps it into
 # the package filename.
@@ -61,15 +61,15 @@ copy_driver() {
         exit 1
     fi
 
-    if [ ! -f "${DRIVER_OUTPUT}/r8125.ko" ]; then
-        echo "ERROR: Driver not found at ${DRIVER_OUTPUT}/r8125.ko"
+    if [ ! -f "${DRIVER_OUTPUT}/r8152.ko" ]; then
+        echo "ERROR: Driver not found at ${DRIVER_OUTPUT}/r8152.ko"
         echo "Please build the driver first using ./build.sh driver"
         exit 1
     fi
 
     # Copy driver to the target architecture directory
     mkdir -p "${QPKG_SOURCE}/${QPKG_ARCH}"
-    cp "${DRIVER_OUTPUT}/r8125.ko" "${QPKG_SOURCE}/${QPKG_ARCH}/"
+    cp "${DRIVER_OUTPUT}/r8152.ko" "${QPKG_SOURCE}/${QPKG_ARCH}/"
     echo "Driver copied to ${QPKG_SOURCE}/${QPKG_ARCH}/"
 }
 
@@ -86,12 +86,12 @@ set_permissions() {
     fi
 
     # Keep the web UI version label in sync with the driver version being packaged
-    # (single source of truth: src/r8125.h -> build_driver.sh -> here). This re-writes
+    # (single source of truth: r8152.c -> build_driver.sh -> here). This re-writes
     # the value regardless of what is currently committed, so it can never drift.
     WEB_INDEX="${QPKG_SOURCE}/shared/web/index.html"
     if [ -n "${DRIVER_VERSION}" ] && [ -f "${WEB_INDEX}" ]; then
         echo "Updating web UI version to: ${DRIVER_VERSION}"
-        sed -i "s|\(<strong>Version:</strong>\)[^<]*<|\1 ${DRIVER_VERSION}<|" "${WEB_INDEX}"
+        sed -i "s|\(<strong>Driver version:</strong>\)[^<]*<|\1 ${DRIVER_VERSION}<|" "${WEB_INDEX}"
     fi
 
     # Log driver version being packaged
@@ -100,10 +100,10 @@ set_permissions() {
     fi
 
     # Make scripts executable if they exist
-    if [ -f "${QPKG_SOURCE}/shared/RTL8125_Driver.sh" ]; then
-        chmod +x "${QPKG_SOURCE}/shared/RTL8125_Driver.sh"
+    if [ -f "${QPKG_SOURCE}/shared/RTL8152_Driver.sh" ]; then
+        chmod +x "${QPKG_SOURCE}/shared/RTL8152_Driver.sh"
     else
-        echo "ERROR: ${QPKG_SOURCE}/shared/RTL8125_Driver.sh not found"
+        echo "ERROR: ${QPKG_SOURCE}/shared/RTL8152_Driver.sh not found"
         echo "QPKG_SOURCE directory contents:"
         ls -laR "${QPKG_SOURCE}/" || true
         exit 1
@@ -169,7 +169,7 @@ show_summary() {
     echo ""
     echo "To verify after installation:"
     echo "  - Check App Center for Remove button"
-    echo "  - SSH: lsmod | grep r8125"
+    echo "  - SSH: lsmod | grep r8152"
     echo "===================================="
 }
 

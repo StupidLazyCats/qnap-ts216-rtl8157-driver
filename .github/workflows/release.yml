@@ -1,165 +1,152 @@
-name: Build and Release QPKG
+name: Build TS-216 RTL8157 driver
 
 on:
-  # Cut the release in the GitHub UI (or `gh release create`); this attaches the
-  # QPKG to it. `published` rather than `created` so that publishing a draft, which
-  # only fires `published`, is not silently ignored.
-  release:
-    types: [published]
-  # Build-only smoke test. Leaves the artifact on the run; never touches a release.
   workflow_dispatch:
     inputs:
       force_rebuild:
-        description: 'Force rebuild Docker image (bypass cache)'
+        description: Ignore saved Docker layer cache
         required: false
         type: boolean
         default: false
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          # Build exactly what was tagged. Empty on workflow_dispatch, where
-          # checkout falls back to the ref the run was started from.
-          ref: ${{ github.event.release.tag_name }}
+      - name: Check out source
+        uses: actions/checkout@v4
 
-      - name: Load versions from versions.yml
-        id: get_version
+      - name: Read build configuration
+        id: config
+        shell: bash
         run: |
-          # Read versions from versions.yml. The Realtek driver version is NOT here -
-          # build_driver.sh reads it out of the source it downloads and writes it to
-          # output/driver/driver_version, which is what the QPKG is stamped with.
-          KERNEL_VERSION=$(grep 'kernel_version:' versions.yml | head -1 | sed 's/.*kernel_version:[[:space:]]*"\(.*\)".*/\1/' | tr -d '"' | tr -d "'")
-          QTS_VERSION=$(grep 'qts_version:' versions.yml | sed 's/.*qts_version:[[:space:]]*"\(.*\)".*/\1/' | tr -d '"' | tr -d "'")
-
-          # Target platform (same keys build.sh reads)
+          set -euo pipefail
           read_key() {
-            grep "^$1:" versions.yml | sed "s/^$1:[[:space:]]*\"\(.*\)\".*/\1/" | tr -d '"' | tr -d "'"
+            grep "^$1:" versions.yml | sed "s/^$1:[[:space:]]*\"\(.*\)\".*/\1/" | tr -d "'"
           }
+
+          KERNEL_VERSION=$(sed -n 's/.*kernel_version:[[:space:]]*"\([^"]*\)".*/\1/p' versions.yml | head -1)
+          QTS_VERSION=$(sed -n 's/.*qts_version:[[:space:]]*"\([^"]*\)".*/\1/p' versions.yml | head -1)
           TARGET_MODEL=$(read_key target_model)
-          KERNEL_CONFIG_FILE=$(read_key kernel_config)
+          KERNEL_CONFIG=$(read_key kernel_config)
           KERNEL_ARCH=$(read_key kernel_arch)
-          CROSS_COMPILE_PREFIX=$(read_key cross_compile)
+          CROSS_COMPILE=$(read_key cross_compile)
           QPKG_ARCH=$(read_key qpkg_arch)
-          KERNEL_SERIES=$(echo "$KERNEL_VERSION" | cut -d. -f1-2)
+          KERNEL_SERIES=$(cut -d. -f1-2 <<< "${KERNEL_VERSION}")
+          DOCKER_TAG="qts-${QTS_VERSION}-kernel-${KERNEL_VERSION}-${TARGET_MODEL}-${KERNEL_ARCH}"
 
-          # Cache key for the build image. The image holds only the cross toolchain
-          # and the built kernel tree - the driver source is fetched at `docker run`
-          # time - so the driver release is deliberately not part of this.
-          DOCKER_TAG="qts-${QTS_VERSION}-kernel-${KERNEL_VERSION}-${KERNEL_ARCH}"
+          for value in KERNEL_VERSION QTS_VERSION TARGET_MODEL KERNEL_CONFIG KERNEL_ARCH CROSS_COMPILE QPKG_ARCH; do
+            if [ -z "${!value}" ]; then
+              echo "Missing ${value} in versions.yml" >&2
+              exit 1
+            fi
+          done
 
-          echo "target_model=$TARGET_MODEL" >> $GITHUB_OUTPUT
-          echo "kernel_config_file=$KERNEL_CONFIG_FILE" >> $GITHUB_OUTPUT
-          echo "kernel_arch=$KERNEL_ARCH" >> $GITHUB_OUTPUT
-          echo "cross_compile_prefix=$CROSS_COMPILE_PREFIX" >> $GITHUB_OUTPUT
-          echo "qpkg_arch=$QPKG_ARCH" >> $GITHUB_OUTPUT
-          echo "kernel_series=$KERNEL_SERIES" >> $GITHUB_OUTPUT
+          {
+            echo "kernel_version=${KERNEL_VERSION}"
+            echo "qts_version=${QTS_VERSION}"
+            echo "target_model=${TARGET_MODEL}"
+            echo "kernel_config=${KERNEL_CONFIG}"
+            echo "kernel_arch=${KERNEL_ARCH}"
+            echo "cross_compile=${CROSS_COMPILE}"
+            echo "qpkg_arch=${QPKG_ARCH}"
+            echo "kernel_series=${KERNEL_SERIES}"
+            echo "docker_tag=${DOCKER_TAG}"
+          } >> "${GITHUB_OUTPUT}"
 
-          echo "kernel_version=$KERNEL_VERSION" >> $GITHUB_OUTPUT
-          echo "qts_version=$QTS_VERSION" >> $GITHUB_OUTPUT
-          echo "docker_tag=$DOCKER_TAG" >> $GITHUB_OUTPUT
-
-          echo "Building for: $TARGET_MODEL ($KERNEL_ARCH)"
-          echo "  Kernel: $KERNEL_VERSION"
-          echo "  QTS: $QTS_VERSION"
-          echo "  Docker tag: $DOCKER_TAG"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Cache GPL source
-        if: github.event.inputs.force_rebuild != 'true'
-        uses: actions/cache@v6
+      - name: Cache extracted QNAP GPL source
+        if: inputs.force_rebuild != true
+        uses: actions/cache@v4
         with:
-          path: GPL_QTS/
-          key: gpl-${{ hashFiles('versions.yml') }}
-          restore-keys: gpl-
+          path: GPL_QTS
+          key: qnap-gpl-${{ hashFiles('versions.yml', 'prepare_gpl_source.sh') }}
 
-      - name: Cache Docker layers
-        if: github.event.inputs.force_rebuild != 'true'
-        uses: actions/cache@v6
-        with:
-          path: /tmp/.buildx-cache
-          key: buildx-${{ steps.get_version.outputs.docker_tag }}
-          restore-keys: |
-            buildx-qts-${{ steps.get_version.outputs.qts_version }}-
-
-      - name: Prepare GPL source
+      - name: Download and extract QNAP GPL source
         run: ./prepare_gpl_source.sh
 
-      - name: Build Docker image with cache
-        uses: docker/build-push-action@v7
+      - name: Validate TS-X16 kernel config
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="GPL_QTS/kernel_cfg/${{ steps.config.outputs.target_model }}/${{ steps.config.outputs.kernel_config }}"
+          if [ ! -f "${CONFIG}" ]; then
+            echo "Expected kernel config is missing: ${CONFIG}" >&2
+            echo "Available ARM64 5.10 configs:" >&2
+            find GPL_QTS/kernel_cfg -type f -name '*5.10*arm64*' -print 2>/dev/null | sort >&2 || true
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache prepared kernel layers
+        if: inputs.force_rebuild != true
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: kernel-${{ steps.config.outputs.docker_tag }}-${{ hashFiles('Dockerfile', 'build_kernel.sh') }}
+          restore-keys: |
+            kernel-${{ steps.config.outputs.docker_tag }}-
+
+      - name: Build prepared-kernel image
+        uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: rtl8125-builder:${{ steps.get_version.outputs.docker_tag }}
+          tags: rtl8152-builder:${{ steps.config.outputs.docker_tag }}
           build-args: |
-            TARGET_MODEL=${{ steps.get_version.outputs.target_model }}
-            KERNEL_SERIES=${{ steps.get_version.outputs.kernel_series }}
-            KERNEL_CONFIG_FILE=${{ steps.get_version.outputs.kernel_config_file }}
-            KERNEL_VERSION=${{ steps.get_version.outputs.kernel_version }}
-            KERNEL_ARCH=${{ steps.get_version.outputs.kernel_arch }}
-            CROSS_COMPILE_PREFIX=${{ steps.get_version.outputs.cross_compile_prefix }}
+            TARGET_MODEL=${{ steps.config.outputs.target_model }}
+            KERNEL_SERIES=${{ steps.config.outputs.kernel_series }}
+            KERNEL_CONFIG_FILE=${{ steps.config.outputs.kernel_config }}
+            KERNEL_VERSION=${{ steps.config.outputs.kernel_version }}
+            KERNEL_ARCH=${{ steps.config.outputs.kernel_arch }}
+            CROSS_COMPILE_PREFIX=${{ steps.config.outputs.cross_compile }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Build driver
-        id: build_driver
+      - name: Compile and verify r8152.ko
+        id: driver
+        shell: bash
         run: |
-          export DOCKER_TAG="${{ steps.get_version.outputs.docker_tag }}"
-          bash build.sh driver
-          # Written by build_driver.sh from RTL8125_VERSION in the source it compiled
-          echo "driver_version=$(cat output/driver/driver_version)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          export DOCKER_TAG="${{ steps.config.outputs.docker_tag }}"
+          ./build.sh driver
+          echo "version=$(cat output/driver/driver_version)" >> "${GITHUB_OUTPUT}"
 
-      - name: Create QPKG
+      - name: Package QPKG
+        shell: bash
         run: |
-          export DOCKER_TAG="${{ steps.get_version.outputs.docker_tag }}"
-          bash build.sh qpkg
+          set -euo pipefail
+          export DOCKER_TAG="${{ steps.config.outputs.docker_tag }}"
+          ./build.sh qpkg
 
-      - name: Move cache
-        if: github.event.inputs.force_rebuild != 'true'
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-      - name: List built artifacts
+      - name: Show produced files
         if: always()
+        run: find output -maxdepth 3 -type f -exec ls -lh {} \; 2>/dev/null || true
+
+      - name: Upload module, metadata, and QPKG
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts216-rtl8157-${{ steps.driver.outputs.version || github.run_id }}
+          path: |
+            output/driver/r8152.ko
+            output/driver/module_info.txt
+            output/driver/driver_version
+            output/driver/r8152.ko.sha256
+            output/*.qpkg
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Replace Docker cache
+        if: always() && inputs.force_rebuild != true
+        shell: bash
         run: |
-          echo "Built artifacts:"
-          echo "================"
-          if [ -d "output" ]; then
-            echo "Output directory structure:"
-            find output -type f -exec ls -lh {} \;
-            echo ""
-            echo "Summary:"
-            ls -lh output/ 2>/dev/null || echo "No files in output/"
-            ls -lh output/driver/ 2>/dev/null || echo "No driver files"
-            ls -lh output/*.qpkg 2>/dev/null || echo "No QPKG files"
-          else
-            echo "ERROR: output directory does not exist"
+          if [ -d /tmp/.buildx-cache-new ]; then
+            rm -rf /tmp/.buildx-cache
+            mv /tmp/.buildx-cache-new /tmp/.buildx-cache
           fi
-
-      - name: Upload QPKG to the release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v3
-        with:
-          # Attach to the release that triggered this run. name/body/prerelease are
-          # deliberately not set: the action preserves whatever the release already
-          # has when they are omitted, so the notes written by hand survive.
-          tag_name: ${{ github.event.release.tag_name }}
-          files: output/*.qpkg
-
-      - name: Upload build artifacts
-        if: success() || failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: qpkg-${{ steps.build_driver.outputs.driver_version || github.run_id }}
-          path: output/*.qpkg
-          # 90 is the ceiling for a public repo on a personal account
-          retention-days: 90

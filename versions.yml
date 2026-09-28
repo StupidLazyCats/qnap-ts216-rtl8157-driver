@@ -1,49 +1,39 @@
-# Version configuration for RTL8125 Driver QPKG
+# Version configuration for RTL8152 Driver QPKG
 # This file controls all versions and GPL sources used during the build process
 
-# NOTE: the Realtek driver version is deliberately NOT configured here. It is read
-# out of RTL8125_VERSION in the src/r8125.h that was actually downloaded, verified
-# against the compiled module's modinfo, and written to output/driver/driver_version
-# - which is then what the QPKG is stamped with. Changing the driver means moving
-# driver_source_tag (or driver_url) below; the version follows on its own.
+# The source is pinned to a commit so Actions builds remain reproducible. The
+# driver version is read from r8152.c and stamped into the QPKG automatically.
 
 # Where to fetch the driver source from.
 #
-# Realtek's own download page (https://www.realtek.com/Download/List?cate_id=584)
-# is a JS-rendered SPA whose files sit behind a per-release download id and an
-# EULA confirmation POST, so it cannot be fetched reproducibly from a script and
-# any hardcoded id breaks on the next release. driver_source_tag instead points at
-# a tag of awesometic/realtek-r8125-dkms, which vendors Realtek's pristine src/
-# tree alongside Realtek's own REALTEK_README.txt.
-#
-# Set driver_url to fetch from somewhere else - a Realtek direct link obtained by
-# hand, or a local mirror. When non-empty it takes precedence over
-# driver_source_tag. The archive must unpack to a tree containing src/Makefile.
-driver_source_tag: "9.018.00-1"
+# RikshaDriver carries Realtek's r8152 source plus compatibility changes for
+# older QNAP kernels. This commit is v2.20.1 and includes USB ID 0bda:8157.
+driver_source_ref: "8a0c34389618ea9c4c833bd3fd6631a12e78e6db"
 driver_url: ""
 
 # QNAP GPL Kernel Source Configuration
 # The GPL source is distributed as split archives that must be concatenated
 # List the URLs in order - they will be downloaded and combined automatically
 gpl_source:
-  # QTS/QuTS hero 5.2.3 (kernel 5.10.60-qnap)
+  # QTS 5.2.0 GPL bundle. Unlike the later 5.2.3 drop, this bundle contains the
+  # ARM64 material needed for the TS-X16 kernel tree.
   kernel_version: "5.10.60"
-  qts_version: "5.2.3"
-  build_date: "20250218"
+  qts_version: "5.2.0"
+  build_date: "20240910"
 
   # Split archive URLs (must be in correct order for concatenation)
   urls:
-    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.3/QTS_Kernel_5.2.3.20250218.0.tar.gz?viasf=1"
-    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.3/QTS_Kernel_5.2.3.20250218.1.tar.gz?viasf=1"
+    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.0/QTS_Kernel_5.2.0.20240910.0.tar.gz?viasf=1"
+    - "https://master.dl.sourceforge.net/project/qosgpl/QNAP%20NAS%20GPL%20Source/QTS%205.2.0/QTS_Kernel_5.2.0.20240910.1.tar.gz?viasf=1"
 
   # Alternative: Single archive (if QNAP provides non-split version)
   # urls:
   #   - "https://path/to/single/archive.tar.gz"
 
-# Target platform: QNAP TS-433 (Rockchip RK3568, ARM Cortex-A55, aarch64)
+# Target platform: QNAP TS-216/TS-416 (TS-X16, Rockchip RK3566, aarch64)
 #
 # target_model    - subdirectory under GPL_QTS/kernel_cfg/ holding the kernel config.
-#                   TS-X33 is the TS-233/TS-433 family (CONFIG_ARCH_ROCKCHIP=y).
+#                   TS-X16 is the TS-216/TS-416 firmware family.
 # kernel_config   - the config file the kernel tree is built with.
 # kernel_arch     - value passed to the kernel build as ARCH=.
 # cross_compile   - toolchain prefix. The build host is x86_64, so the module is
@@ -53,7 +43,7 @@ gpl_source:
 #                   Valid values: arm-x09, arm-x19, arm-x31, arm-x41, arm_64,
 #                   x86, x86_ce53xx, x86_64. Also names the output .qpkg.
 # target_uname_m  - what `uname -m` reports on the NAS, checked at install time.
-target_model: "TS-X33"
+target_model: "TS-X16"
 kernel_config: "linux-5.10-arm64.config"
 kernel_arch: "arm64"
 cross_compile: "aarch64-linux-gnu-"
@@ -61,7 +51,7 @@ qpkg_arch: "arm_64"
 target_uname_m: "aarch64"
 
 # Notes:
-# - driver_source_tag: which upstream r8125 release gets built (and thus packaged)
+# - driver_source_ref: pinned upstream r8152 source commit
 # - gpl_source.urls: Can be 1 or more URLs - will be concatenated in order
 # - target_model: Must match a directory in GPL_QTS/kernel_cfg/
 # - qpkg_version: the compiled Realtek version, unless QPKG_VERSION overrides it
@@ -72,7 +62,4 @@ target_uname_m: "aarch64"
 # has to be configured and built from source at Docker image build time - see
 # build_kernel.sh.
 #
-# Example:
-# - driver_source_tag: 9.018.00-1 -> source declares RTL8125_VERSION "9.018.00"
-# - gpl_source.kernel_version: 5.10.60 (QNAP kernel)
-# - Result: RTL8125_Driver_9.018.00_arm_64.qpkg
+# Result: RTL8152_Driver_2.20.1_arm_64.qpkg

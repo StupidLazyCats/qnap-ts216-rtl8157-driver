@@ -5,8 +5,8 @@ output/
 GPL_QTS/
 
 # QPKG build artifacts
-qpkg/RTL8125_Driver/build/
-qpkg/RTL8125_Driver/arm_64/r8125.ko
+qpkg/RTL8152_Driver/build/
+qpkg/RTL8152_Driver/arm_64/r8152.ko
 
 # Docker build cache
 .docker/
@@ -36,4 +36,3 @@ QTS_Kernel_combined.tar.gz
 
 *sec.endpointdlp
 *Zone.Identifier
-

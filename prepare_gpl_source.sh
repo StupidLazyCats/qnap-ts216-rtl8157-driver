@@ -75,8 +75,8 @@ echo "========================================"
 echo ""
 
 # Check if GPL_QTS already exists
-if [ -d "${GPL_TARGET_DIR}/src/linux-5.10" ]; then
-    KERNEL_VER=$(get_kernel_version)
+KERNEL_VER=$(get_kernel_version)
+if [ -d "${GPL_TARGET_DIR}/src/linux-${KERNEL_VER}" ]; then
     echo "✓ GPL source already extracted: ${GPL_TARGET_DIR}/src/linux-${KERNEL_VER}/"
     echo "  Skipping extraction. To re-extract, remove ${GPL_TARGET_DIR}/ first."
     exit 0
@@ -87,7 +87,7 @@ mkdir -p "${GPL_SOURCE_DIR}"
 
 # Try to find existing archives first
 echo "[1/5] Checking for GPL kernel archives..."
-EXISTING_FILES=($(find "${GPL_SOURCE_DIR}" -name "*.tar.gz" -type f | sort))
+mapfile -t EXISTING_FILES < <(find "${GPL_SOURCE_DIR}" -name "QTS_Kernel_*.tar.gz" -type f | sort)
 
 # If no local files, try to parse URLs from versions.yml
 if [ ${#EXISTING_FILES[@]} -eq 0 ]; then
@@ -124,7 +124,7 @@ if [ ${#EXISTING_FILES[@]} -eq 0 ]; then
         echo "  [$((i+1))/${#GPL_URLS[@]}] Downloading: $(basename "$filename")"
         echo "      URL: $url"
 
-        if ! wget --no-check-certificate -q --show-progress -O "$filepath" "$url"; then
+        if ! wget --tries=3 --timeout=30 -q --show-progress -O "$filepath" "$url"; then
             echo "  ✗ Error: Failed to download"
             rm -f "$filepath"
             exit 1
@@ -177,7 +177,7 @@ echo ""
 echo "[4/5] Extracting GPL source..."
 echo "  This may take a few minutes..."
 
-tar -xzf "${COMBINED}" 2>&1 | head -20 || true
+tar -xzf "${COMBINED}"
 
 if [ ! -d "${GPL_TARGET_DIR}" ]; then
     echo "✗ Error: Extraction failed, ${GPL_TARGET_DIR}/ not created"
@@ -188,9 +188,6 @@ echo "  ✓ Extracted to: ${GPL_TARGET_DIR}/"
 
 echo ""
 echo "[5/5] Verifying kernel source..."
-
-# Get kernel version from config
-KERNEL_VER=$(get_kernel_version)
 
 # Verify required files exist
 REQUIRED_FILES=(
