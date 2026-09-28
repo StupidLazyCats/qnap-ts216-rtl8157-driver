@@ -63,7 +63,7 @@ pkg_install(){
             ;;
     esac
 
-    if ! strings "${DRIVER_PATH}" 2>/dev/null | grep -qi "alias=usb:v00000BDAp00008157"; then
+    if ! strings "${DRIVER_PATH}" 2>/dev/null | grep -qi "alias=usb:v0BDAp8157"; then
         log "ERROR: Packaged module does not advertise RTL8157 USB ID 0bda:8157"
         return 1
     fi

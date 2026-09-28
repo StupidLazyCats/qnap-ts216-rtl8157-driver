@@ -118,7 +118,7 @@ verify_and_export() {
     fi
 
     if ! modinfo -F alias "${DRIVER_NAME}.ko" | \
-        grep -qi 'usb:v00000BDAp00008157'; then
+        grep -qi 'usb:v0BDAp8157'; then
         echo "ERROR: compiled module does not advertise USB ID 0bda:8157"
         exit 1
     fi
